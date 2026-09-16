@@ -1,7 +1,6 @@
 {
-  "name": "phantom-town-bot",
+  "name": "phantom-bot",
   "version": "1.0.0",
-  "description": "Bot for Phantom Town RP",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
