@@ -1,7 +1,8 @@
 const { 
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, 
     ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, 
-    TextInputStyle, REST, Routes, SlashCommandBuilder, PermissionFlagsBits 
+    TextInputStyle, REST, Routes, SlashCommandBuilder, PermissionFlagsBits,
+    ComponentType
 } = require('discord.js');
 const express = require('express');
 const fs = require('fs');
@@ -52,7 +53,7 @@ function saveDB() {
 
 function getAccount(userId) {
     if (!db.eco[userId]) {
-        db.eco[userId] = { cash: 1000, bank: 5000, lastDaily: 0 };
+        db.eco[userId] = { cash: 1000, bank: 5000 };
         saveDB();
     }
     return db.eco[userId];
@@ -79,8 +80,8 @@ async function sendAdminLog(guild, title, executor, target, reason, details = ''
     const embed = new EmbedBuilder()
         .setTitle(`🛡️ إجراء إداري: ${title}`)
         .addFields(
-            { name: '👤 الإداري المنفذ', value: `<@${executor.id}> (${executor.tag})`, inline: true },
-            { name: '🎯 العضو المستهدف', value: target ? `<@${target.id || target}> (${target.tag || target})` : 'غير محدد', inline: true },
+            { name: '👤 الإداري المنفذ', value: `<@${executor.id}> (${executor.tag || executor.username})`, inline: true },
+            { name: '🎯 العضو المستهدف', value: target ? `<@${target.id || target}> (${target.tag || target.username || target})` : 'غير محدد', inline: true },
             { name: '📝 السبب', value: reason || 'لا يوجد سبب محدد', inline: false }
         )
         .setColor(0xe74c3c)
@@ -103,7 +104,7 @@ const commands = [
         .setName('set-auto-reply')
         .setDescription('[إدارة] إضافة كلمة مفتاحية ورد تلقائي خاص بها'),
 
-    // 2️⃣ أوامر الاقتصاد والشحطة والسجن
+    // 2️⃣ أوامر الاقتصاد والمخالفات والسجن
     new SlashCommandBuilder().setName('citation').setDescription('إصدار مخالفة مرورية/إدارية - Phantom Town'),
     new SlashCommandBuilder().setName('arrest').setDescription('إصدار تقرير سجن واعتقال - Phantom Town'),
     new SlashCommandBuilder().setName('balance').setDescription('عرض رصيدك المالي في البنك والكاش'),
@@ -114,12 +115,23 @@ const commands = [
     new SlashCommandBuilder().setName('transfer').setDescription('تحويل أموال لشخص آخر')
         .addUserOption(opt => opt.setName('user').setDescription('الشخص المستقبل').setRequired(true))
         .addIntegerOption(opt => opt.setName('amount').setDescription('المبلغ').setRequired(true)),
-    new SlashCommandBuilder().setName('daily').setDescription('استلام المكافأة/الراتب اليومي'),
     new SlashCommandBuilder().setName('addmoney').setDescription('[إدارة] إضافة أموال للاعب')
         .addUserOption(opt => opt.setName('user').setDescription('المستهدف').setRequired(true))
         .addIntegerOption(opt => opt.setName('amount').setDescription('المبلغ').setRequired(true)),
 
-    // 3️⃣ الأوامر الإدارية الجديدة
+    // 🔴 أمر تصفير الأموال للمشرفين الإداريين
+    new SlashCommandBuilder()
+        .setName('resetmoney')
+        .setDescription('[إدارة/مشرفين] تصفير الرصيد المالي للاعب (كاش / بنك / الكل)')
+        .addUserOption(opt => opt.setName('user').setDescription('العضو المستهدف').setRequired(true))
+        .addStringOption(opt => opt.setName('type').setDescription('نوع التصفير').setRequired(true)
+            .addChoices(
+                { name: 'تصفير الكاش فقط', value: 'cash' },
+                { name: 'تصفير البنك فقط', value: 'bank' },
+                { name: 'تصفير الكل (الكاش والبنك)', value: 'all' }
+            )),
+
+    // 3️⃣ الأوامر الإدارية العقابية
     new SlashCommandBuilder()
         .setName('ban')
         .setDescription('[إدارة عامة] حظر عضو من السيرفر')
@@ -166,7 +178,31 @@ const commands = [
         .setName('warn')
         .setDescription('[إدارة] إعطاء تحذير إداري لعضو')
         .addUserOption(opt => opt.setName('user').setDescription('العضو').setRequired(true))
-        .addStringOption(opt => opt.setName('reason').setDescription('سبب التحذير').setRequired(true))
+        .addStringOption(opt => opt.setName('reason').setDescription('سبب التحذير').setRequired(true)),
+
+    // 4️⃣ الأوامر الإضافية
+    new SlashCommandBuilder()
+        .setName('setnick')
+        .setDescription('[إدارة] تغيير اسم عضو بسرعة داخل السيرفر')
+        .addUserOption(opt => opt.setName('user').setDescription('العضو المستهدف').setRequired(true))
+        .addStringOption(opt => opt.setName('nickname').setDescription('الاسم الجديد').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('slowmode')
+        .setDescription('[إدارة] وضع وضع بطيء للكتابة في الروم')
+        .addIntegerOption(opt => opt.setName('seconds').setDescription('المدة بالثواني (0 لإلغائه)').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('search-wallet')
+        .setDescription('[الشرطة] تفتيش الحساب المالي والكاش للشخص المستهدف')
+        .addUserOption(opt => opt.setName('user').setDescription('الشخص المستهدف').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('anon-msg')
+        .setDescription('[إدارة] إرسال رسالة مجهولة أو مقلب باسم مستعار في روم محددة')
+        .addChannelOption(opt => opt.setName('channel').setDescription('الروم المستهدفة').setRequired(true))
+        .addStringOption(opt => opt.setName('message').setDescription('محتوى الرسالة').setRequired(true))
+        .addStringOption(opt => opt.setName('name').setDescription('اسم المرسل المستعار (اختياري)').setRequired(false))
 ];
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -175,7 +211,7 @@ client.once('ready', async () => {
     console.log(`✅ تم تشغيل البوت المكتمل لسيرفر Phantom Town بنجاح: ${client.user.tag}`);
     try {
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-        console.log('✅ تم تسجيل كافة الأوامر التفاعلية والديناميكية والإدارية بنجاح!');
+        console.log('✅ تم تسجيل كافة الأوامر التفاعلية والديناميكية والإدارية والجديدة بنجاح!');
     } catch (err) {
         console.error('خطأ في تسجيل الأوامر:', err);
     }
@@ -200,18 +236,40 @@ client.on('guildMemberAdd', async (member) => {
     });
 });
 
-// ==================== 💬 نظام الردود التلقائية واللوحات الثابتة ====================
+// ==================== 💬 نظام الردود التلقائية ونداء الإدارة ====================
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
     const content = message.content.trim().toLowerCase();
 
-    // 🤖 1. الردود التلقائية الديناميكية من قاعدة البيانات
+    // 🚨 1. أمر نداء الإدارة تلقائياً عند كتابة "ابي ادارة"
+    if (content === 'ابي ادارة') {
+        await message.reply({ content: '🚨 تم إرسال نداء للإدارة، سيتم التجاوب معك قريباً.', ephemeral: true }).catch(() => {});
+
+        const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
+        if (logChannel) {
+            const alertEmbed = new EmbedBuilder()
+                .setTitle('🚨 نداء إدارة عاجل!')
+                .setColor(0xff0000)
+                .addFields(
+                    { name: '👤 العضو المنادي', value: `<@${message.author.id}> (${message.author.tag})`, inline: true },
+                    { name: '📍 الروم', value: `<#${message.channel.id}>`, inline: true },
+                    { name: '🔗 رابط الرسالة', value: `[اضغط هنا للذهاب للرسالة](${message.url})`, inline: false }
+                )
+                .setTimestamp()
+                .setFooter({ text: 'Phantom Town | نظام نداء الإدارة' });
+
+            await logChannel.send({ content: `<@&${ADMIN_ROLE_ID}>`, embeds: [alertEmbed] });
+        }
+        return;
+    }
+
+    // 🤖 2. الردود التلقائية الديناميكية من قاعدة البيانات
     if (db.autoReplies && db.autoReplies[content]) {
         return message.reply(db.autoReplies[content]);
     }
 
-    // 🤖 2. الردود التلقائية الثابتة
+    // 🤖 3. الردود التلقائية الثابتة
     if (content === 'السلام عليكم' || content === 'سلام عليكم') {
         return message.reply(' *** وعليكم السلام ورحمة الله وبركاته *** ');
     }
@@ -250,10 +308,12 @@ client.on('messageCreate', async (message) => {
 client.on('interactionCreate', async (interaction) => {
 
     // --------------------------------------------------
-    // A. أزرار اللوحات الثابتة (أثبت نفسك والبصمة)
+    // A. أزرار اللوحات الثابتة والتقديم
     // --------------------------------------------------
     if (interaction.isButton()) {
-        if (interaction.customId === 'btn_verify') {
+        const id = interaction.customId;
+
+        if (id === 'btn_verify') {
             try {
                 await interaction.member.roles.add(VERIFIED_ROLE_ID);
                 return await interaction.reply({ content: '✅ تم توثيق حسابك وإعطاؤك رتبة مواطن بنجاح!', ephemeral: true });
@@ -262,8 +322,8 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        if (interaction.customId === 'btn_punch_in' || interaction.customId === 'btn_punch_out') {
-            const isLogin = interaction.customId === 'btn_punch_in';
+        if (id === 'btn_punch_in' || id === 'btn_punch_out') {
+            const isLogin = id === 'btn_punch_in';
             const reqRole = POLICE_ROLE_ID; 
             if (!interaction.member.roles.cache.has(reqRole)) {
                 return await interaction.reply({ content: '❌ لا تملك رتبة للتبصيم.', ephemeral: true });
@@ -284,6 +344,56 @@ client.on('interactionCreate', async (interaction) => {
                 await fpChannel.send({ embeds: [embed] });
             }
         }
+
+        // أزرار التقديم التفاعلي
+        if (id.startsWith('user_apply_')) {
+            const appId = id.replace('user_apply_', '');
+            const appData = db.apps[appId];
+            if (!appData) return await interaction.reply({ content: '❌ لوحة التقديم غير متوفرة أو تم إلغاؤها.', ephemeral: true });
+
+            const modal = new ModalBuilder()
+                .setCustomId(`submit_user_app_${appId}`)
+                .setTitle(appData.title.slice(0, 45));
+
+            const rows = appData.questions.map((q, idx) => {
+                const input = new TextInputBuilder()
+                    .setCustomId(`q_answer_${idx}`)
+                    .setLabel(q.slice(0, 45))
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(true);
+                return new ActionRowBuilder().addComponents(input);
+            });
+
+            modal.addComponents(rows);
+            return await interaction.showModal(modal);
+        }
+
+        if (id.startsWith('accept_') || id.startsWith('reject_')) {
+            if (!hasModPermissions(interaction.member)) return await interaction.reply({ content: '❌ لا تملك صلاحية معالجة التقديمات.', ephemeral: true });
+
+            const isAccept = id.startsWith('accept_');
+            const targetUserId = id.replace(isAccept ? 'accept_' : 'reject_', '');
+            const targetUser = await client.users.fetch(targetUserId).catch(() => null);
+
+            if (targetUser) {
+                const notifyEmbed = new EmbedBuilder()
+                    .setTitle(`📩 نتيجة التقديم • Phantom Town`)
+                    .setDescription(isAccept ? '🎉 تهانينا! تم **قبول** طلب تقديمك بنجاح.' : '❌ نأسف لإبلاغك بأنه تم **رفض** طلب تقديمك.')
+                    .setColor(isAccept ? 0x2ecc71 : 0xe74c3c)
+                    .setFooter({ text: 'Phantom Town | مدينة الأشباح' });
+
+                await targetUser.send({ embeds: [notifyEmbed] }).catch(() => {});
+            }
+
+            await interaction.reply({ content: `✅ تم ${isAccept ? 'قبول' : 'رفض'} المتقدم بنجاح.`, ephemeral: true });
+            
+            // تعديل الرسالة لمنع التكرار
+            const originalEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+                .setColor(isAccept ? 0x2ecc71 : 0xe74c3c)
+                .setTitle(`${interaction.message.embeds[0].title} [${isAccept ? 'تم القبول ✅' : 'تم الرفض ❌'}]`);
+
+            await interaction.message.edit({ embeds: [originalEmbed], components: [] });
+        }
     }
 
     // --------------------------------------------------
@@ -293,9 +403,140 @@ client.on('interactionCreate', async (interaction) => {
         const cmd = interaction.commandName;
         const acc = getAccount(interaction.user.id);
 
-        // --- الأوامر الإدارية ---
+        // --- 1. أمر تصفير الحساب المالي (خاص بالمشرفين والإدارة) ---
+        if (cmd === 'resetmoney') {
+            if (!hasModPermissions(interaction.member)) {
+                return await interaction.reply({ content: '❌ هذا الأمر مخصص فقط للمشرفين والإدارة!', ephemeral: true });
+            }
 
-        // 1. أمر /ban (للإدارة العامة فقط)
+            const target = interaction.options.getUser('user');
+            const type = interaction.options.getString('type');
+            const targetAcc = getAccount(target.id);
+
+            let messageDetails = '';
+
+            if (type === 'cash') {
+                targetAcc.cash = 0;
+                messageDetails = 'الكاش ($0)';
+            } else if (type === 'bank') {
+                targetAcc.bank = 0;
+                messageDetails = 'البنك ($0)';
+            } else if (type === 'all') {
+                targetAcc.cash = 0;
+                targetAcc.bank = 0;
+                messageDetails = 'الكاش والبنك ($0)';
+            }
+
+            saveDB();
+
+            await interaction.reply({ content: `♻️ تم تصفير **${messageDetails}** للحساب المالي الخاص بـ <@${target.id}> بنجاح.` });
+            await sendAdminLog(interaction.guild, 'تصفير أموال (/resetmoney)', interaction.user, target, 'تصفير إداري للحساب المالي', `النوع المصفر: ${messageDetails}`);
+        }
+
+        // --- 2. الأوامر الإدارية الأخرى ---
+        if (cmd === 'setnick') {
+            if (!hasModPermissions(interaction.member)) return await interaction.reply({ content: '❌ لا تملك صلاحية استخدام هذا الأمر.', ephemeral: true });
+            const target = interaction.options.getMember('user');
+            const newNick = interaction.options.getString('nickname');
+
+            if (!target) return await interaction.reply({ content: '❌ العضو غير موجود بالسيرفر.', ephemeral: true });
+
+            try {
+                await target.setNickname(newNick);
+                await interaction.reply({ content: `✅ تم تغيير اسم ${target} إلى **${newNick}** بنجاح.`, ephemeral: true });
+                await sendAdminLog(interaction.guild, 'تغيير الاسم (/setnick)', interaction.user, target.user, `الاسم الجديد: ${newNick}`);
+            } catch (err) {
+                await interaction.reply({ content: '❌ تعذر تغيير الاسم (تأكد من رتبة البوت بالنسبة للعضو).', ephemeral: true });
+            }
+        }
+
+        if (cmd === 'slowmode') {
+            if (!hasModPermissions(interaction.member)) return await interaction.reply({ content: '❌ لا تملك صلاحية استخدام هذا الأمر.', ephemeral: true });
+            const seconds = interaction.options.getInteger('seconds');
+
+            try {
+                await interaction.channel.setRateLimitPerUser(seconds);
+                if (seconds === 0) {
+                    await interaction.reply({ content: '✅ تم إلغاء الوضع البطيء في الروم.' });
+                } else {
+                    await interaction.reply({ content: `⏱️ تم تحديد الوضع البطيء بـ **${seconds} ثانية** في هذه الروم.` });
+                }
+                await sendAdminLog(interaction.guild, 'الوضع البطيء (/slowmode)', interaction.user, null, `تحديث الوضع البطيء في <#${interaction.channel.id}>`, `المدة: ${seconds} ثانية`);
+            } catch (err) {
+                await interaction.reply({ content: '❌ حدث خطأ أثناء تغيير الوضع البطيء.', ephemeral: true });
+            }
+        }
+
+        if (cmd === 'search-wallet') {
+            if (!interaction.member.roles.cache.has(POLICE_ROLE_ID)) {
+                return await interaction.reply({ content: '👮 هذا الأمر مخصص لرجال الشرطة فقط!', ephemeral: true });
+            }
+
+            const targetUser = interaction.options.getUser('user');
+            const targetAcc = getAccount(targetUser.id);
+
+            const walletEmbed = new EmbedBuilder()
+                .setTitle(`🔎 تفتيش مالي: ${targetUser.username}`)
+                .setColor(0x1e90ff)
+                .addFields(
+                    { name: '💵 الكاش المتوفر حالياً:', value: `$${targetAcc.cash.toLocaleString()}` }
+                )
+                .setFooter({ text: 'Phantom Town | إدارة الشرطة - الضبط والتفتيش' });
+
+            const stealBtn = new ButtonBuilder()
+                .setCustomId(`steal_cash_${targetUser.id}`)
+                .setLabel('مصادرة/سرقة الأموال (غير قانوني)')
+                .setStyle(ButtonStyle.Danger);
+
+            const row = new ActionRowBuilder().addComponents(stealBtn);
+
+            const response = await interaction.reply({ embeds: [walletEmbed], components: [row], ephemeral: true });
+
+            const collector = response.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60000 });
+
+            collector.on('collect', async (i) => {
+                if (i.user.id !== interaction.user.id) return i.reply({ content: 'لا يمكنك استخدام هذا الزر.', ephemeral: true });
+
+                const storableCash = targetAcc.cash;
+                if (storableCash <= 0) return i.reply({ content: '❌ هذا الشخص لا يملك أي كاش لمصادرته!', ephemeral: true });
+
+                targetAcc.cash = 0;
+                saveDB();
+
+                await sendAdminLog(interaction.guild, 'مصادرة كاش غير قانونية (/search-wallet)', interaction.user, targetUser, 'مصادرة أموال أثناء التفتيش', `المبلغ المستولى عليه: $${storableCash.toLocaleString()}`);
+
+                await i.update({
+                    content: `⚠️ قمت بمصادرة **$${storableCash.toLocaleString()}** من ${targetUser} بشكل غير قانوني! (تم توثيق العملية للوق الإداري).`,
+                    embeds: [],
+                    components: []
+                });
+            });
+        }
+
+        if (cmd === 'anon-msg') {
+            if (!hasModPermissions(interaction.member)) return await interaction.reply({ content: '❌ لا تملك صلاحية استخدام هذا الأمر.', ephemeral: true });
+
+            const targetChannel = interaction.options.getChannel('channel');
+            const messageText = interaction.options.getString('message');
+            const customName = interaction.options.getString('name');
+
+            if (!targetChannel.isTextBased()) return await interaction.reply({ content: '❌ يجب اختيار روم كتابية.', ephemeral: true });
+
+            try {
+                const anonEmbed = new EmbedBuilder()
+                    .setDescription(messageText)
+                    .setColor(0x2f3136);
+
+                if (customName) anonEmbed.setAuthor({ name: customName });
+
+                await targetChannel.send({ embeds: [anonEmbed] });
+                await interaction.reply({ content: `✅ تم إرسال الرسالة بنجاح في <#${targetChannel.id}>.`, ephemeral: true });
+            } catch (err) {
+                await interaction.reply({ content: '❌ حدث خطأ أثناء إرسال الرسالة.', ephemeral: true });
+            }
+        }
+
+        // --- 3. أوامر العقوبات الإدارية ---
         if (cmd === 'ban') {
             if (!hasAdminPermissions(interaction.member)) return await interaction.reply({ content: '❌ هذا الأمر مخصص فقط لرتبة الإدارة العامة.', ephemeral: true });
             const target = interaction.options.getUser('user');
@@ -310,7 +551,6 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        // 2. أمر /unban (للإدارة العامة فقط)
         if (cmd === 'unban') {
             if (!hasAdminPermissions(interaction.member)) return await interaction.reply({ content: '❌ هذا الأمر مخصص فقط لرتبة الإدارة العامة.', ephemeral: true });
             const userId = interaction.options.getString('userid');
@@ -324,7 +564,6 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        // 3. أمر /kick (للإدارة والمشرفين)
         if (cmd === 'kick') {
             if (!hasModPermissions(interaction.member)) return await interaction.reply({ content: '❌ لا تملك الصلاحية الإدارية لاستخدام هذا الأمر.', ephemeral: true });
             const targetMember = interaction.options.getMember('user');
@@ -341,7 +580,6 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        // 4. أمر /timeout (للإدارة والمشرفين)
         if (cmd === 'timeout') {
             if (!hasModPermissions(interaction.member)) return await interaction.reply({ content: '❌ لا تملك الصلاحية الإدارية.', ephemeral: true });
             const targetMember = interaction.options.getMember('user');
@@ -359,7 +597,6 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        // 5. أمر /untimeout
         if (cmd === 'untimeout') {
             if (!hasModPermissions(interaction.member)) return await interaction.reply({ content: '❌ لا تملك الصلاحية الإدارية.', ephemeral: true });
             const targetMember = interaction.options.getMember('user');
@@ -375,7 +612,6 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        // 6. أمر /clear
         if (cmd === 'clear') {
             if (!hasModPermissions(interaction.member)) return await interaction.reply({ content: '❌ لا تملك الصلاحية الإدارية.', ephemeral: true });
             const amount = interaction.options.getInteger('amount');
@@ -389,7 +625,6 @@ client.on('interactionCreate', async (interaction) => {
             await sendAdminLog(interaction.guild, 'مسح رسائل (Clear)', interaction.user, null, `مسح رسائل في الروم <#${interaction.channel.id}>`, `العدد: ${deleted.size}`);
         }
 
-        // 7. أمر /lock
         if (cmd === 'lock') {
             if (!hasModPermissions(interaction.member)) return await interaction.reply({ content: '❌ لا تملك الصلاحية الإدارية.', ephemeral: true });
 
@@ -398,7 +633,6 @@ client.on('interactionCreate', async (interaction) => {
             await sendAdminLog(interaction.guild, 'قفل روم (Lock)', interaction.user, null, `قفل الكتابة في <#${interaction.channel.id}>`);
         }
 
-        // 8. أمر /unlock
         if (cmd === 'unlock') {
             if (!hasModPermissions(interaction.member)) return await interaction.reply({ content: '❌ لا تملك الصلاحية الإدارية.', ephemeral: true });
 
@@ -407,7 +641,6 @@ client.on('interactionCreate', async (interaction) => {
             await sendAdminLog(interaction.guild, 'فتح روم (Unlock)', interaction.user, null, `فتح الكتابة في <#${interaction.channel.id}>`);
         }
 
-        // 9. أمر /warn
         if (cmd === 'warn') {
             if (!hasModPermissions(interaction.member)) return await interaction.reply({ content: '❌ لا تملك الصلاحية الإدارية.', ephemeral: true });
             const target = interaction.options.getUser('user');
@@ -421,7 +654,7 @@ client.on('interactionCreate', async (interaction) => {
             await sendAdminLog(interaction.guild, 'تحذير إداري (Warn)', interaction.user, target, reason, `إجمالي التحذيرات الحالية: ${db.warns[target.id].length}`);
         }
 
-        // --- الأوامر السابقة (اقتصاد + تقديم + مخالفات) ---
+        // --- 4. باقي أوامر الاقتصاد والتقديم والمخالفات ---
         if (cmd === 'setup-app-phantom') {
             if (!hasAdminPermissions(interaction.member)) return await interaction.reply({ content: '❌ لا تملك الصلاحيات.', ephemeral: true });
             const modal = new ModalBuilder().setCustomId('modal_admin_setup_app').setTitle('إعداد لوحة التقديم والأسئلة');
@@ -448,9 +681,9 @@ client.on('interactionCreate', async (interaction) => {
                 .setTitle(`💳 البنك المركزي | Phantom Town`)
                 .setDescription(`الحساب المالي للاعب: <@${interaction.user.id}>`)
                 .addFields(
-                    { name: '💵 الكاش (Cash)', value: `$${acc.cash}`, inline: true },
-                    { name: '🏦 البنك (Bank)', value: `$${acc.bank}`, inline: true },
-                    { name: '💰 الإجمالي', value: `$${acc.cash + acc.bank}`, inline: true }
+                    { name: '💵 الكاش (Cash)', value: `$${acc.cash.toLocaleString()}`, inline: true },
+                    { name: '🏦 البنك (Bank)', value: `$${acc.bank.toLocaleString()}`, inline: true },
+                    { name: '💰 الإجمالي', value: `$${(acc.cash + acc.bank).toLocaleString()}`, inline: true }
                 )
                 .setColor(0xf1c40f)
                 .setFooter({ text: 'Phantom Town | مدينة الأشباح' });
@@ -463,7 +696,7 @@ client.on('interactionCreate', async (interaction) => {
             acc.cash -= amount;
             acc.bank += amount;
             saveDB();
-            return await interaction.reply(`✅ تم إيداع **$${amount}** في حسابك البنكي.`);
+            return await interaction.reply(`✅ تم إيداع **$${amount.toLocaleString()}** في حسابك البنكي.`);
         }
 
         if (cmd === 'withdraw') {
@@ -472,7 +705,7 @@ client.on('interactionCreate', async (interaction) => {
             acc.bank -= amount;
             acc.cash += amount;
             saveDB();
-            return await interaction.reply(`✅ تم سحب **$${amount}** من حسابك البنكي.`);
+            return await interaction.reply(`✅ تم سحب **$${amount.toLocaleString()}** من حسابك البنكي.`);
         }
 
         if (cmd === 'transfer') {
@@ -483,18 +716,7 @@ client.on('interactionCreate', async (interaction) => {
             acc.bank -= amount;
             targetAcc.bank += amount;
             saveDB();
-            return await interaction.reply(`✅ تم تحويل **$${amount}** بنجاح إلى <@${target.id}>.`);
-        }
-
-        if (cmd === 'daily') {
-            const now = Date.now();
-            if (now - acc.lastDaily < 86400000) {
-                return await interaction.reply({ content: '⏰ لقد استلمت راتبك اليومي بالفعل، عد بعد 24 ساعة!', ephemeral: true });
-            }
-            acc.bank += 2500;
-            acc.lastDaily = now;
-            saveDB();
-            return await interaction.reply('💰 تم إضافة **$2,500** إلى حسابك البنكي كراتب يومي!');
+            return await interaction.reply(`✅ تم تحويل **$${amount.toLocaleString()}** بنجاح إلى <@${target.id}>.`);
         }
 
         if (cmd === 'addmoney') {
@@ -504,7 +726,7 @@ client.on('interactionCreate', async (interaction) => {
             const targetAcc = getAccount(target.id);
             targetAcc.bank += amount;
             saveDB();
-            return await interaction.reply(`✅ تم إضافة **$${amount}** لحساب <@${target.id}> البنكي.`);
+            return await interaction.reply(`✅ تم إضافة **$${amount.toLocaleString()}** لحساب <@${target.id}> البنكي.`);
         }
 
         if (cmd === 'citation') {
@@ -576,7 +798,7 @@ client.on('interactionCreate', async (interaction) => {
                 return { name: `❓ ${q}`, value: answer || 'لا يوجد' };
             });
 
-            await interaction.reply({ content: '✅ تم إرسال تقديمك بنجاح للادارة!', ephemeral: true });
+            await interaction.reply({ content: '✅ تم إرسال تقديمك بنجاح للإدارة!', ephemeral: true });
 
             const logChannel = client.channels.cache.get(LOG_CHANNEL_ID);
             if (logChannel) {
@@ -602,92 +824,39 @@ client.on('interactionCreate', async (interaction) => {
             const embed = new EmbedBuilder()
                 .setTitle('📑 تقرير مخالفة رسمية • Phantom Town')
                 .addFields(
-                    { name: 'اسم المخالف', value: safeVal(interaction.fields.getTextInputValue('name')), inline: true },
-                    { name: 'المخالفة', value: safeVal(interaction.fields.getTextInputValue('violations')) },
-                    { name: 'الغرامة', value: safeVal(interaction.fields.getTextInputValue('fine')), inline: true },
-                    { name: 'المحرر', value: `<@${interaction.user.id}>` }
+                    { name: '👤 اسم المخالف', value: safeVal(interaction.fields.getTextInputValue('name')), inline: true },
+                    { name: '📝 المخالفة', value: safeVal(interaction.fields.getTextInputValue('violations')) },
+                    { name: '💰 الغرامة', value: safeVal(interaction.fields.getTextInputValue('fine')), inline: true },
+                    { name: '👮 المحرر', value: `<@${interaction.user.id}>`, inline: true }
                 )
-                .setColor(0xf1c40f)
-                .setFooter({ text: 'Phantom Town | مدينة الأشباح' });
+                .setColor(0xe67e22)
+                .setTimestamp()
+                .setFooter({ text: 'Phantom Town | إدارة المرور والشرطة' });
 
-            await interaction.reply({ content: '✅ تم تسجيل المخالفة بنجاح.', ephemeral: true });
-            const logCh = client.channels.cache.get(CITATION_LOG_CHANNEL_ID);
-            if (logCh) await logCh.send({ embeds: [embed] });
+            const citationChannel = client.channels.cache.get(CITATION_LOG_CHANNEL_ID);
+            if (citationChannel) await citationChannel.send({ embeds: [embed] });
+            return await interaction.reply({ content: '✅ تم إصدار التقرير وإرساله إلى روم المخالفات بنجاح!', ephemeral: true });
         }
 
         if (id === 'modal_arrest') {
             const embed = new EmbedBuilder()
-                .setTitle('🚨 تقرير سجن واعتقال • Phantom Town')
+                .setTitle('🔒 تقرير اعتقال وسجن • Phantom Town')
                 .addFields(
-                    { name: 'اسم السجين', value: safeVal(interaction.fields.getTextInputValue('name')), inline: true },
-                    { name: 'التهم', value: safeVal(interaction.fields.getTextInputValue('charges')) },
-                    { name: 'المدة', value: safeVal(interaction.fields.getTextInputValue('time')), inline: true },
-                    { name: 'الضابط', value: `<@${interaction.user.id}>` }
+                    { name: '👤 اسم السجين', value: safeVal(interaction.fields.getTextInputValue('name')), inline: true },
+                    { name: '⚖️ التهم', value: safeVal(interaction.fields.getTextInputValue('charges')) },
+                    { name: '⏳ مدة السجن', value: safeVal(interaction.fields.getTextInputValue('time')), inline: true },
+                    { name: '👮 العسكري المنفذ', value: `<@${interaction.user.id}>`, inline: true }
                 )
-                .setColor(0xe74c3c)
-                .setFooter({ text: 'Phantom Town | مدينة الأشباح' });
+                .setColor(0x95a5a6)
+                .setTimestamp()
+                .setFooter({ text: 'Phantom Town | إدارة السجون والشرطة' });
 
-            await interaction.reply({ content: '✅ تم تسجيل تقرير السجن.', ephemeral: true });
-            const logCh = client.channels.cache.get(ARREST_LOG_CHANNEL_ID);
-            if (logCh) await logCh.send({ embeds: [embed] });
-        }
-    }
-
-    // --------------------------------------------------
-    // D. تفاعل زر التقديم وقبول/رفض الإدارة
-    // --------------------------------------------------
-    if (interaction.isButton()) {
-        if (interaction.customId.startsWith('user_apply_')) {
-            const appId = interaction.customId.replace('user_apply_', '');
-            const appData = db.apps[appId];
-            if (!appData) return await interaction.reply({ content: '❌ هذا التقديم غير موجود.', ephemeral: true });
-
-            const modal = new ModalBuilder()
-                .setCustomId(`submit_user_app_${appId}`)
-                .setTitle(appData.title.substring(0, 45));
-
-            appData.questions.forEach((q, index) => {
-                const input = new TextInputBuilder()
-                    .setCustomId(`q_answer_${index}`)
-                    .setLabel(q.length > 45 ? q.substring(0, 42) + '...' : q)
-                    .setStyle(q.length > 20 ? TextInputStyle.Paragraph : TextInputStyle.Short)
-                    .setRequired(true);
-                modal.addComponents(new ActionRowBuilder().addComponents(input));
-            });
-
-            await interaction.showModal(modal);
-        }
-
-        if (interaction.customId.startsWith('accept_') || interaction.customId.startsWith('reject_')) {
-            const isAccept = interaction.customId.startsWith('accept_');
-            const userId = interaction.customId.split('_')[1];
-            const oldEmbed = interaction.message.embeds[0];
-
-            const updatedEmbed = EmbedBuilder.from(oldEmbed)
-                .setColor(isAccept ? 0x2ecc71 : 0xe74c3c)
-                .addFields({ 
-                    name: '📌 القرار النهائي', 
-                    value: isAccept ? `✅ تم القبول بواسطة <@${interaction.user.id}>` : `❌ تم الرفض بواسطة <@${interaction.user.id}>` 
-                });
-
-            await interaction.update({ embeds: [updatedEmbed], components: [] });
-
-            try {
-                const user = await client.users.fetch(userId);
-                if (user) {
-                    if (isAccept) {
-                        await user.send(`🎉 تم **قبول** طلبك في **Phantom Town | مدينة الأشباح**!`);
-                        const member = await interaction.guild.members.fetch(userId).catch(() => null);
-                        if (member) {
-                            await member.roles.add(VERIFIED_ROLE_ID).catch(() => {});
-                        }
-                    } else {
-                        await user.send(`❌ تم **رفض** طلبك في **Phantom Town | مدينة الأشباح**.`);
-                    }
-                }
-            } catch (e) {}
+            const arrestChannel = client.channels.cache.get(ARREST_LOG_CHANNEL_ID);
+            if (arrestChannel) await arrestChannel.send({ embeds: [embed] });
+            return await interaction.reply({ content: '✅ تم إصدار التقرير وإرساله إلى روم السجن بنجاح!', ephemeral: true });
         }
     }
 });
 
+// ==================== 🔑 تسجيل الدخول ====================
 client.login(TOKEN);
